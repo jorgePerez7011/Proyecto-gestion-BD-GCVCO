@@ -1,23 +1,56 @@
 const Order = require("../models/Order");
+const mongoose = require("mongoose");
 
 exports.getAllOrders = async (req, res) => {
   try {
-    const ordenes = await Order.find()
-      .populate('products.product', 'name price')
-      .sort({ created_at: -1 })
-      .lean(); // Convertir a objeto plano de JavaScript
+    const ordenes = await Order.aggregate([
+      // Ordenar por total (de mayor a menor)
+      { $sort: { total: -1 } },
+
+      // Desenrollar el array de productos
+      { $unwind: "$products" },
+
+      // Hacer lookup con la colección de productos usando el ID numérico
+      {
+        $lookup: {
+          from: "products",
+          let: { productId: "$products.product" },
+          pipeline: [
+            {
+              $match: {
+                $expr: { $eq: [{ $toString: "$id" }, "$$productId"] }
+              }
+            }
+          ],
+          as: "productDetails"
+        }
+      },
+
+      // Reagrupar los resultados por orden
+      {
+        $group: {
+          _id: "$_id",
+          id: { $first: "$id" },
+          route: { $first: "$route" },
+          client_id: { $first: "$client_id" },
+          client_name: { $first: "$client_name" },
+          total: { $first: "$total" },
+          created_at: { $first: "$created_at" },
+          date_order: { $first: "$date_order" },
+          products: {
+            $push: {
+              product: "$products.product",
+              name: "$products.name",
+              quantity: "$products.quantity",
+              price: "$products.price",
+              productDetails: { $arrayElemAt: ["$productDetails", 0] }
+            }
+          }
+        }
+      }
+    ]);
     
-    // Asegurarse de que los productos tengan la información correcta
-    const ordenesFormateadas = ordenes.map(orden => ({
-      ...orden,
-      products: orden.products.map(item => ({
-        ...item,
-        name: item.product ? item.product.name : item.name,
-        price: item.price
-      }))
-    }));
-    
-    res.status(200).json(ordenesFormateadas);
+    res.status(200).json(ordenes);
   } catch (error) {
     console.error("Error al obtener órdenes:", error);
     res.status(500).json({ message: "Error al obtener las órdenes", error: error.message });
@@ -26,17 +59,45 @@ exports.getAllOrders = async (req, res) => {
 
 exports.createOrder = async (req, res) => {
   try {
+    console.log('Datos recibidos:', req.body); // Debug
+
+    if (!req.body.products || !Array.isArray(req.body.products) || req.body.products.length === 0) {
+      return res.status(400).json({ message: "Se requiere al menos un producto" });
+    }
+
     // Obtener el último ID
     const lastOrder = await Order.findOne().sort({ id: -1 });
     const newId = lastOrder ? lastOrder.id + 1 : 1;
+
+    // Formatear los productos y validar datos
+    const products = req.body.products.map(p => {
+      if (!p.product || !p.name || !p.quantity || !p.price) {
+        throw new Error("Datos de producto incompletos");
+      }
+      return {
+        product: p.product,
+        name: p.name,
+        quantity: Number(p.quantity),
+        price: Number(p.price)
+      };
+    });
+
+    // Calcular el total sumando precio * cantidad de cada producto
+    const total = products.reduce((sum, product) => {
+      const subtotal = product.price * product.quantity;
+      console.log(`Subtotal para ${product.name}: ${subtotal}`); // Debug
+      return sum + subtotal;
+    }, 0);
+
+    console.log('Total calculado:', total); // Debug
 
     const orderData = {
       id: newId,
       client_id: req.body.client_id,
       client_name: req.body.client_name,
       route: req.body.route,
-      total: req.body.total,
-      products: req.body.products,
+      total: total,
+      products: products,
       date_order: new Date(),
       created_at: new Date(),
       updated_at: new Date()

@@ -13,7 +13,6 @@ const OrderGUI = () => {
   const [orden, setOrden] = useState({
     route: "",
     client_id: "",
-    client_name: "",
     total: 0
   });
 
@@ -47,21 +46,29 @@ const OrderGUI = () => {
   const agregarProducto = (producto) => {
     const productoExistente = productosSeleccionados.find(p => p.id === producto.id);
     
+    let nuevosProductos;
     if (productoExistente) {
-      setProductosSeleccionados(
-        productosSeleccionados.map(p =>
-          p.id === producto.id 
-          ? {...p, cantidad: p.cantidad + 1}
-          : p
-        )
+      nuevosProductos = productosSeleccionados.map(p =>
+        p.id === producto.id 
+        ? {...p, cantidad: p.cantidad + 1}
+        : p
       );
     } else {
-      setProductosSeleccionados([
+      nuevosProductos = [
         ...productosSeleccionados,
         { ...producto, cantidad: 1 }
-      ]);
+      ];
     }
-    calcularTotal();
+    
+    // Calcular el total con los nuevos productos
+    const nuevoTotal = nuevosProductos.reduce(
+      (acc, p) => acc + (p.price * p.cantidad),
+      0
+    );
+    
+    // Actualizar todo de una vez
+    setProductosSeleccionados(nuevosProductos);
+    setOrden(prev => ({...prev, total: nuevoTotal}));
   };
 
   const eliminarProducto = (productoId) => {
@@ -106,10 +113,10 @@ const OrderGUI = () => {
         client_name: orden.client_name,
         total: orden.total,
         products: productosSeleccionados.map(p => ({
-          product: p._id || p.id,
+          product: p.id.toString(),
           quantity: p.cantidad,
           price: p.price,
-          name: p.name // Agregamos el nombre del producto
+          name: p.name
         }))
       };
       
